@@ -20,7 +20,7 @@ body_skeleton = [
     [1, 2], [1, 5], [2, 3], [3, 4], [5, 6], [6, 7], [1, 8], [8, 9], [9, 10], [1, 11],
     [11, 12], [12, 13], [1, 0], [0, 14], [14, 16], [0, 15], [15, 17]
 ]
-face_skeleton = [] 
+face_skeleton = []
 hand_skeleton = [
     [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [0, 9], [9, 10], [10, 11], [11, 12],
     [0, 13], [13, 14], [14, 15], [15, 16], [0, 17], [17, 18], [18, 19], [19, 20]
@@ -71,12 +71,11 @@ def adjust_pose_to_reference_size(source_kps, ref_kps, confidence_threshold=0.1)
     
     adjusted_kps = source_kps.copy()
     
-    print("Stage 1: Global Scaling based on torso.")
     RShoulder, LShoulder, RHip, LHip, Neck = KP["RShoulder"], KP["LShoulder"], KP["RHip"], KP["LHip"], KP["Neck"]
     required_indices = [RShoulder, LShoulder, RHip, LHip, Neck]
     if not all(idx < source_kps.shape[0] and source_kps[idx, 2] > confidence_threshold for idx in required_indices) or \
        not all(idx < ref_kps.shape[0] and ref_kps[idx, 2] > confidence_threshold for idx in required_indices):
-        print("Skipping global scaling: Missing critical torso keypoints.")
+        pass
     else:
         src_shoulder_width = np.linalg.norm(source_kps[LShoulder, :2] - source_kps[RShoulder, :2])
         src_shoulder_center = 0.5 * (source_kps[LShoulder, :2] + source_kps[RShoulder, :2])
@@ -88,7 +87,6 @@ def adjust_pose_to_reference_size(source_kps, ref_kps, confidence_threshold=0.1)
         ref_torso_height = np.linalg.norm(ref_shoulder_center - ref_hip_center)
         x_ratio = ref_shoulder_width / src_shoulder_width if src_shoulder_width > 1e-6 else 1.0
         y_ratio = ref_torso_height / src_torso_height if src_torso_height > 1e-6 else 1.0
-        print(f"Global scaling ratios -> x: {x_ratio:.2f}, y: {y_ratio:.2f}")
         neck_pos = adjusted_kps[Neck, :2].copy()
         for i in range(adjusted_kps.shape[0]):
             if adjusted_kps[i, 2] > 0:
@@ -97,7 +95,6 @@ def adjust_pose_to_reference_size(source_kps, ref_kps, confidence_threshold=0.1)
                 vec_from_neck[1] *= y_ratio
                 adjusted_kps[i, :2] = neck_pos + vec_from_neck
     
-    print("Stage 2: Local refinement for each bone.")
     bones_to_adjust = [
         (KP["Neck"], KP["Nose"], [KP["Nose"], KP["REye"], KP["LEye"], KP["REar"], KP["LEar"]]),
         (KP["RShoulder"], KP["RElbow"], [KP["RElbow"], KP["RWrist"]]),
@@ -126,7 +123,6 @@ def adjust_pose_to_reference_size(source_kps, ref_kps, confidence_threshold=0.1)
             if idx < adjusted_kps.shape[0] and adjusted_kps[idx, 2] > 0:
                 adjusted_kps[idx, :2] += offset
     
-    print("Stage 3: Final alignment based on Neck position.")
     if Neck < adjusted_kps.shape[0] and Neck < ref_kps.shape[0] and \
        adjusted_kps[Neck, 2] > confidence_threshold and ref_kps[Neck, 2] > confidence_threshold:
         final_offset = ref_kps[Neck, :2] - adjusted_kps[Neck, :2]
@@ -143,7 +139,6 @@ def adjust_pose_to_reference_size(source_kps, ref_kps, confidence_threshold=0.1)
         if adj_head_area > 1e-6 and ref_head_area > 1e-6 and adj_head_center is not None:
             scale_factor_head = np.sqrt(ref_head_area / adj_head_area)
             if abs(1.0 - scale_factor_head) > 0.01:
-                print(f"Scaling head cluster (Nose, Eyes, Ears) by: {scale_factor_head:.2f}")
                 center_x, center_y = adj_head_center
                 for kp_idx in head_kp_indices:
                     if kp_idx < adjusted_kps.shape[0] and adjusted_kps[kp_idx, 2] > confidence_threshold:
@@ -154,7 +149,7 @@ def adjust_pose_to_reference_size(source_kps, ref_kps, confidence_threshold=0.1)
 
 def adjust_face_keypoints_size(full_face_kps_np, scale_factor, center_xy, confidence_threshold=0.1):
     adjusted_kps = full_face_kps_np.copy()
-    if center_xy is None : return adjusted_kps 
+    if center_xy is None : return adjusted_kps
     center_x, center_y = center_xy
     for i in range(adjusted_kps.shape[0]):
         x, y, conf = adjusted_kps[i]
@@ -162,28 +157,41 @@ def adjust_face_keypoints_size(full_face_kps_np, scale_factor, center_xy, confid
             adjusted_kps[i, :2] = (center_x + (x - center_x) * scale_factor, center_y + (y - center_y) * scale_factor)
     return adjusted_kps
 
-def post_adjust_face_by_chin_distance(ref_body_kps, ref_face_kps, adjusted_body_kps, adjusted_face_kps, confidence_threshold=0.1):
-    CHIN_INDEX = 30
-    if ref_body_kps.shape[0] <= KP["Nose"] or ref_body_kps[KP["Nose"], 2] < confidence_threshold: return adjusted_face_kps
-    if ref_face_kps.shape[0] <= CHIN_INDEX or ref_face_kps[CHIN_INDEX, 2] < confidence_threshold: return adjusted_face_kps
-    ref_nose_pos = ref_body_kps[KP["Nose"], :2]
-    ref_chin_pos = ref_face_kps[CHIN_INDEX, :2]
-    ref_dist = np.linalg.norm(ref_nose_pos - ref_chin_pos)
-    if adjusted_body_kps.shape[0] <= KP["Nose"] or adjusted_body_kps[KP["Nose"], 2] < confidence_threshold: return adjusted_face_kps
-    if adjusted_face_kps.shape[0] <= CHIN_INDEX or adjusted_face_kps[CHIN_INDEX, 2] < confidence_threshold: return adjusted_face_kps
-    adj_nose_pos = adjusted_body_kps[KP["Nose"], :2]
-    current_chin_pos = adjusted_face_kps[CHIN_INDEX, :2]
-    vec_nose_to_current_chin = current_chin_pos - adj_nose_pos
-    current_dist = np.linalg.norm(vec_nose_to_current_chin)
-    if current_dist < 1e-6: return adjusted_face_kps
-    direction_vec = vec_nose_to_current_chin / current_dist
-    desired_chin_pos = adj_nose_pos + direction_vec * ref_dist
-    translation_vector = desired_chin_pos - current_chin_pos
+def adjust_face_to_maintain_relative_offset(orig_target_body_kps, orig_target_face_kps, adjusted_body_kps, adjusted_face_kps, confidence_threshold=0.1):
+    """
+    orig_target_pose(pose_to)의 신체 코와 얼굴 코의 상대적 거리를 계산하고,
+    신체 비율이 조정된 후에도 동일한 상대적 거리를 유지하도록 얼굴 위치를 조정합니다.
+    """
+    FACE_NOSE_INDEX = 8  # 얼굴 랜드마크에서 코의 인덱스
+
+    # 1. 'pose_to'의 원본 데이터에서 원래의 상대적 거리(오프셋) 계산
+    if orig_target_body_kps.shape[0] <= KP["Nose"] or orig_target_body_kps[KP["Nose"], 2] < confidence_threshold or \
+       orig_target_face_kps.shape[0] <= FACE_NOSE_INDEX or orig_target_face_kps[FACE_NOSE_INDEX, 2] < confidence_threshold:
+        return adjusted_face_kps
+
+    orig_body_nose_pos = orig_target_body_kps[KP["Nose"], :2]
+    orig_face_nose_pos = orig_target_face_kps[FACE_NOSE_INDEX, :2]
+    original_offset = orig_face_nose_pos - orig_body_nose_pos
+
+    # 2. 비율이 조정된 신체 코와 현재 얼굴 코 위치 확인
+    if adjusted_body_kps.shape[0] <= KP["Nose"] or adjusted_body_kps[KP["Nose"], 2] < confidence_threshold or \
+       adjusted_face_kps.shape[0] <= FACE_NOSE_INDEX or adjusted_face_kps[FACE_NOSE_INDEX, 2] < confidence_threshold:
+        return adjusted_face_kps
+
+    adjusted_body_nose_pos = adjusted_body_kps[KP["Nose"], :2]
+    current_face_nose_pos = adjusted_face_kps[FACE_NOSE_INDEX, :2]
+
+    # 3. '얼굴 코'의 최종 목표 위치 계산
+    desired_face_nose_pos = adjusted_body_nose_pos + original_offset
+
+    # 4. 얼굴 전체를 이동시킬 변위 계산 및 적용
+    translation_vector = desired_face_nose_pos - current_face_nose_pos
+    
     final_face_kps = adjusted_face_kps.copy()
     for i in range(final_face_kps.shape[0]):
         if final_face_kps[i, 2] > confidence_threshold:
             final_face_kps[i, :2] += translation_vector
-    print(f"Face translated to match Nose-to-Chin(30) distance. Offset: ({translation_vector[0]:.2f}, {translation_vector[1]:.2f})")
+            
     return final_face_kps
 
 def calculate_hand_intrinsic_properties(hand_kps_np, confidence_threshold=0.1):
@@ -210,7 +218,7 @@ def transform_hand_final(target_hand_kps_np_orig, target_body_wrist_pos_xy_adj, 
     ref_offset_bodywrist_to_handkp0 = ref_hand_kp0_pos - ref_body_wrist_pos_xy_orig
     scale_factor = ref_scale / target_orig_scale if target_orig_scale > 1e-6 else 1.0
     scaled_target_hand_kps = target_hand_kps_np_orig.copy()
-    pivot_for_scaling = target_orig_hand_kp0_pos.copy() 
+    pivot_for_scaling = target_orig_hand_kp0_pos.copy()
     for i in range(scaled_target_hand_kps.shape[0]):
         if scaled_target_hand_kps[i, 2] > confidence_threshold:
             vec_from_pivot = scaled_target_hand_kps[i, :2] - pivot_for_scaling
@@ -265,16 +273,15 @@ def gen_skeleton_with_face_hands(pose_keypoints_2d, face_keypoints_2d, hand_left
 def transform_all_keypoints(keypoints_1, keypoints_2, frames, interpolation="linear"):
     def interpolate_keypoint_set(kp1, kp2, num_frames, interp_method):
         if not kp1 and not kp2: return [[] for _ in range(num_frames)]
-        if not kp1: kp1 = [0.0] * len(kp2) if kp2 else [] 
-        if not kp2: kp2 = [0.0] * len(kp1) if kp1 else [] 
-        if not kp1 and not kp2: return [[] for _ in range(num_frames)] 
+        if not kp1: kp1 = [0.0] * len(kp2) if kp2 else []
+        if not kp2: kp2 = [0.0] * len(kp1) if kp1 else []
+        if not kp1 and not kp2: return [[] for _ in range(num_frames)]
         if len(kp1) != len(kp2):
-            print(f"Warning: Keypoint sets have different lengths ({len(kp1)} vs {len(kp2)}). Returning empty sequence.")
             return [[] for _ in range(num_frames)]
         tri_tuples_1 = [kp1[i:i + 3] for i in range(0, len(kp1), 3)]
         tri_tuples_2 = [kp2[i:i + 3] for i in range(0, len(kp2), 3)]
         if not tri_tuples_1 and not tri_tuples_2 : return [[] for _ in range(num_frames)]
-        if not tri_tuples_1: tri_tuples_1 = [[0,0,0]] * len(tri_tuples_2) 
+        if not tri_tuples_1: tri_tuples_1 = [[0,0,0]] * len(tri_tuples_2)
         if not tri_tuples_2: tri_tuples_2 = [[0,0,0]] * len(tri_tuples_1)
         keypoints_sequence = []
         for j in range(num_frames):
@@ -309,6 +316,19 @@ def transform_all_keypoints(keypoints_1, keypoints_2, frames, interpolation="lin
         combined_sequence.append(combined_frame)
     return combined_sequence
 
+def apply_confidence_threshold(keypoints_list, threshold):
+    if not keypoints_list:
+        return []
+
+    filtered_kps = []
+    for i in range(0, len(keypoints_list), 3):
+        x, y, c = keypoints_list[i:i+3]
+        if c < threshold:
+            filtered_kps.extend([0.0, 0.0, 0.0])
+        else:
+            filtered_kps.extend([x, y, c])
+    return filtered_kps
+
 class Pose_Inter:
     def __init__(self):
         pass
@@ -321,29 +341,31 @@ class Pose_Inter:
                 "pose_from": ("POSE_KEYPOINT", ), "pose_to": ("POSE_KEYPOINT", ),
                 "interpolate_frames": ("INT", {"default": 12, "min": 2, "max": 240, "step": 1}),
                 "interpolation": (interpolation_methods, {"default": "linear"}),
-                "confidence_threshold": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "adjust_body_shape": ("BOOLEAN", {"default": True}),
+                "confidence_threshold": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "adjust_body_shape": ("BOOLEAN", {"default": False}),
                 "landmarkType": (["OpenPose", "DWPose"], {"default": "DWPose"}),
                 "include_face": ("BOOLEAN", {"default": True}),
                 "include_hands": ("BOOLEAN", {"default": True}),
             },
         }
-    RETURN_TYPES = ("IMAGE",)
+
+    RETURN_TYPES = ("IMAGE", "POSE_KEYPOINT",)
+    RETURN_NAMES = ("image", "pose_keypoint",)
     FUNCTION = "run"
     CATEGORY = "Pose Interpolation"
 
     def run(self, pose_from, pose_to, interpolate_frames, interpolation, confidence_threshold, landmarkType, include_face, include_hands, adjust_body_shape):
         if not pose_from or not pose_to: raise ValueError("Input pose data is empty.")
-        
+
         openpose_dict_from = pose_from[0] if isinstance(pose_from, list) and pose_from else pose_from
         openpose_dict_to = pose_to[0] if isinstance(pose_to, list) and pose_to else pose_to
-        
+
         if "people" not in openpose_dict_from or not openpose_dict_from["people"]: raise ValueError("No people found in 'pose_from'.")
         if "people" not in openpose_dict_to or not openpose_dict_to["people"]: raise ValueError("No people found in 'pose_to'.")
-        
+
         person_from = openpose_dict_from["people"][0]
-        person_to = openpose_dict_to["people"][0] 
-        
+        person_to = openpose_dict_to["people"][0]
+
         keypoints_from = {
             'pose_keypoints_2d': person_from.get("pose_keypoints_2d", []),
             'face_keypoints_2d': person_from.get("face_keypoints_2d", []) if include_face else [],
@@ -356,92 +378,104 @@ class Pose_Inter:
             'hand_left_keypoints_2d': person_to.get("hand_left_keypoints_2d", []) if include_hands else [],
             'hand_right_keypoints_2d': person_to.get("hand_right_keypoints_2d", []) if include_hands else []
         }
-        
+
         original_person_to_face_kps = person_to.get("face_keypoints_2d", []) if include_face else []
         original_person_to_hand_left_kps = person_to.get("hand_left_keypoints_2d", []) if include_hands else []
         original_person_to_hand_right_kps = person_to.get("hand_right_keypoints_2d", []) if include_hands else []
-        
+
         kps_from_np_body = np.array(keypoints_from['pose_keypoints_2d']).reshape(-1, 3) if keypoints_from['pose_keypoints_2d'] else np.array([])
         kps_to_np_body_for_adjustment = np.array(keypoints_to['pose_keypoints_2d']).reshape(-1, 3) if keypoints_to['pose_keypoints_2d'] else np.array([])
-        kps_to_np_body_adjusted_for_face_hands = kps_to_np_body_for_adjustment.copy()
-        
+
         if adjust_body_shape:
-            print("Adjusting 'pose_to' BODY shape using improved 3-stage method...")
+            kps_to_np_body_adjusted = kps_to_np_body_for_adjustment.copy()
             if kps_from_np_body.size > 0 and kps_to_np_body_for_adjustment.size > 0:
                 adjusted_body_kps = adjust_pose_to_reference_size(kps_to_np_body_for_adjustment, kps_from_np_body, confidence_threshold)
                 keypoints_to['pose_keypoints_2d'] = adjusted_body_kps.flatten().tolist()
-                kps_to_np_body_adjusted_for_face_hands = adjusted_body_kps 
-                print("Body shape adjustment complete.")
-            else:
-                print("Skipping body adjustment (empty or malformed keypoints).")
+                kps_to_np_body_adjusted = adjusted_body_kps
 
             if include_face:
-                print("Adjusting 'pose_to' FACE pose...")
                 face_kps_from_np = np.array(keypoints_from['face_keypoints_2d']).reshape(-1, 3) if keypoints_from['face_keypoints_2d'] else np.array([])
                 face_kps_to_np_orig = np.array(original_person_to_face_kps).reshape(-1, 3) if original_person_to_face_kps else np.array([])
-                final_adjusted_face_kps_np = face_kps_to_np_orig.copy()
+
                 if face_kps_from_np.size > 0 and face_kps_to_np_orig.size > 0:
+                    # 1. 얼굴 '크기'를 먼저 조정합니다.
+                    final_adjusted_face_kps_np = face_kps_to_np_orig.copy()
                     area_from, _ = get_bounding_box_area_and_center(face_kps_from_np, confidence_threshold)
                     area_to_orig, center_to_face_orig = get_bounding_box_area_and_center(face_kps_to_np_orig, confidence_threshold)
                     if area_to_orig > 1e-6 and area_from > 1e-6 and center_to_face_orig is not None:
                         scale_factor = np.sqrt(area_from / area_to_orig)
                         final_adjusted_face_kps_np = adjust_face_keypoints_size(face_kps_to_np_orig, scale_factor, center_to_face_orig, confidence_threshold)
-                    final_adjusted_face_kps_np = post_adjust_face_by_chin_distance(kps_from_np_body, face_kps_from_np, kps_to_np_body_adjusted_for_face_hands, final_adjusted_face_kps_np, confidence_threshold)
+
+                    # 2. 크기 조정이 끝난 얼굴의 '위치'를 최종 조정합니다.
+                    final_adjusted_face_kps_np = adjust_face_to_maintain_relative_offset(
+                        kps_to_np_body_for_adjustment, # pose_to의 원본 body
+                        face_kps_to_np_orig,           # pose_to의 원본 face
+                        kps_to_np_body_adjusted,       # 비율이 조정된 body
+                        final_adjusted_face_kps_np,    # 크기가 조정된 face
+                        confidence_threshold
+                    )
                     keypoints_to['face_keypoints_2d'] = final_adjusted_face_kps_np.flatten().tolist()
 
             if include_hands:
-                print("Adjusting 'pose_to' HAND pose...")
                 for hand_type in ["left", "right"]:
                     wrist_kp_name = "LWrist" if hand_type == "left" else "RWrist"
-                    ref_body_wrist_pos_xy_orig = None
+                    ref_body_wrist_pos_xy_orig, target_body_wrist_pos_xy_adj = None, None
                     if kps_from_np_body.size > 0 and KP[wrist_kp_name] < kps_from_np_body.shape[0] and kps_from_np_body[KP[wrist_kp_name], 2] > confidence_threshold:
                         ref_body_wrist_pos_xy_orig = kps_from_np_body[KP[wrist_kp_name], :2]
-                    target_body_wrist_pos_xy_adj = None
-                    if kps_to_np_body_adjusted_for_face_hands.size > 0 and KP[wrist_kp_name] < kps_to_np_body_adjusted_for_face_hands.shape[0] and kps_to_np_body_adjusted_for_face_hands[KP[wrist_kp_name], 2] > confidence_threshold:
-                        target_body_wrist_pos_xy_adj = kps_to_np_body_adjusted_for_face_hands[KP[wrist_kp_name], :2]
-                    
+                    if kps_to_np_body_adjusted.size > 0 and KP[wrist_kp_name] < kps_to_np_body_adjusted.shape[0] and kps_to_np_body_adjusted[KP[wrist_kp_name], 2] > confidence_threshold:
+                        target_body_wrist_pos_xy_adj = kps_to_np_body_adjusted[KP[wrist_kp_name], :2]
+
                     ref_hand_kps_list = keypoints_from.get(f'hand_{hand_type}_keypoints_2d', [])
-                    if ref_hand_kps_list and len(ref_hand_kps_list) % 3 == 0:
-                        ref_hand_kps_np_orig = np.array(ref_hand_kps_list).reshape(-1, 3)
-                    else:
-                        ref_hand_kps_np_orig = np.array([])
+                    ref_hand_kps_np_orig = np.array(ref_hand_kps_list).reshape(-1, 3) if ref_hand_kps_list and len(ref_hand_kps_list) % 3 == 0 else np.array([])
 
                     target_hand_kps_list_orig = original_person_to_hand_left_kps if hand_type == "left" else original_person_to_hand_right_kps
-                    if target_hand_kps_list_orig and len(target_hand_kps_list_orig) % 3 == 0:
-                        target_hand_kps_np_orig = np.array(target_hand_kps_list_orig).reshape(-1, 3)
-                    else:
-                        target_hand_kps_np_orig = np.array([])
+                    target_hand_kps_np_orig = np.array(target_hand_kps_list_orig).reshape(-1, 3) if target_hand_kps_list_orig and len(target_hand_kps_list_orig) % 3 == 0 else np.array([])
 
-                    if ref_body_wrist_pos_xy_orig is None or target_body_wrist_pos_xy_adj is None or ref_hand_kps_np_orig.size == 0 or target_hand_kps_np_orig.size == 0:
-                        print(f"Skipping {hand_type} hand adjustment: Missing critical keypoints.")
-                        continue
-
-                    adjusted_hand_kps_list = transform_hand_final(target_hand_kps_np_orig, target_body_wrist_pos_xy_adj, ref_hand_kps_np_orig, ref_body_wrist_pos_xy_orig, confidence_threshold)
-                    keypoints_to[f'hand_{hand_type}_keypoints_2d'] = adjusted_hand_kps_list
-                    print(f"{hand_type.capitalize()} hand pose adjustment complete.")
+                    if ref_body_wrist_pos_xy_orig is not None and target_body_wrist_pos_xy_adj is not None and ref_hand_kps_np_orig.size > 0 and target_hand_kps_np_orig.size > 0:
+                        adjusted_hand_kps_list = transform_hand_final(target_hand_kps_np_orig, target_body_wrist_pos_xy_adj, ref_hand_kps_np_orig, ref_body_wrist_pos_xy_orig, confidence_threshold)
+                        keypoints_to[f'hand_{hand_type}_keypoints_2d'] = adjusted_hand_kps_list
 
         interpolated_sequence = transform_all_keypoints(keypoints_from, keypoints_to, interpolate_frames, interpolation)
-        
+
         output_images = []
-        canvas_width = openpose_dict_from.get("canvas_width", 512)
-        canvas_height = openpose_dict_from.get("canvas_height", 512)
+        output_poses = []
 
         for frame_data in interpolated_sequence:
+            pose_output_frame = copy.deepcopy(openpose_dict_from)
+
+            pose_kps_final = apply_confidence_threshold(frame_data['pose_keypoints_2d'], confidence_threshold)
+            face_kps_final = apply_confidence_threshold(frame_data['face_keypoints_2d'], confidence_threshold)
+            hand_left_kps_final = apply_confidence_threshold(frame_data['hand_left_keypoints_2d'], confidence_threshold)
+            hand_right_kps_final = apply_confidence_threshold(frame_data['hand_right_keypoints_2d'], confidence_threshold)
+
+            if "people" in pose_output_frame and pose_output_frame["people"]:
+                pose_output_frame["people"][0]["pose_keypoints_2d"] = pose_kps_final
+                pose_output_frame["people"][0]["face_keypoints_2d"] = face_kps_final
+                pose_output_frame["people"][0]["hand_left_keypoints_2d"] = hand_left_kps_final
+                pose_output_frame["people"][0]["hand_right_keypoints_2d"] = hand_right_kps_final
+
+            output_poses.append(pose_output_frame)
+
             image_np = gen_skeleton_with_face_hands(
-                frame_data['pose_keypoints_2d'], 
-                frame_data['face_keypoints_2d'],
-                frame_data['hand_left_keypoints_2d'], 
-                frame_data['hand_right_keypoints_2d'],
-                canvas_width, canvas_height, landmarkType, confidence_threshold
+                pose_kps_final,
+                face_kps_final,
+                hand_left_kps_final,
+                hand_right_kps_final,
+                pose_output_frame.get("canvas_width", 512),
+                pose_output_frame.get("canvas_height", 512),
+                landmarkType,
+                confidence_threshold
             )
             image_tensor = torch.from_numpy(image_np.astype(np.float32) / 255.0)
             output_images.append(image_tensor)
-        
+
         if not output_images:
+            canvas_height = openpose_dict_from.get("canvas_height", 512)
+            canvas_width = openpose_dict_from.get("canvas_width", 512)
             black_image_np = np.zeros((canvas_height, canvas_width, 3), dtype=np.float32)
-            return (torch.from_numpy(black_image_np).unsqueeze(0),)
-            
-        return (torch.stack(output_images),)
+            return (torch.from_numpy(black_image_np).unsqueeze(0), [])
+
+        return (torch.stack(output_images), output_poses)
 
 NODE_CLASS_MAPPINGS = {
     "Pose_Inter": Pose_Inter
