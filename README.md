@@ -7,6 +7,9 @@ Interpolates two DWpose or Openpose by a set number of frames.
 
 https://github.com/user-attachments/assets/9e2a47c8-2d87-4792-94b6-b6ae5b83b5df
 
+I recommend using this node in conjunction with openpose-editor.
+https://github.com/toyxyz/ComfyUI-ultimate-openpose-editor
+
 # update
 
 Added Pick_frame. 
