@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import copy
 from matplotlib.colors import hsv_to_rgb
+import json
 
 DEFAULT_BODY_LIMB_THICKNESS = 6
 DEFAULT_BODY_POINT_RADIUS = 5
@@ -451,7 +452,7 @@ class Pose_Inter:
                 "pose_from": ("POSE_KEYPOINT", ), "pose_to": ("POSE_KEYPOINT", ),
                 "interpolate_frames": ("INT", {"default": 12, "min": 1, "max": 99999, "step": 1}), 
                 "interpolation": (interpolation_methods, {"default": "linear"}),
-                "confidence_threshold": ("FLOAT", {"default": 0.1, "min": 0.0, "max": 1.0, "step": 0.01}), 
+                "confidence_threshold": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.01}), 
                 "adjust_body_shape": ("BOOLEAN", {"default": False}),
                 "landmarkType": (["OpenPose", "DWPose"], {"default": "DWPose"}), 
                 "include_face": ("BOOLEAN", {"default": True}),
@@ -681,9 +682,152 @@ class Pose_Inter:
 
         return (torch.stack(final_output_images), final_output_poses)
 
+class PoseKeypointToCoordStr: #
+    def __init__(self): #
+        pass #
+
+    @classmethod
+    def INPUT_TYPES(cls): #
+        return { #
+            "required": { #
+                "pose_keypoint": ("POSE_KEYPOINT",), #
+                "enable_body": ("BOOLEAN", {"default": True, "label_on": "Body Enabled", "label_off": "Body Disabled"}),
+                "enable_face": ("BOOLEAN", {"default": True, "label_on": "Face Enabled", "label_off": "Face Disabled"}),
+                "enable_hand": ("BOOLEAN", {"default": True, "label_on": "Hands Enabled", "label_off": "Hands Disabled"}),
+                "enable_extra_points": ("BOOLEAN", {"default": False, "label_on": "Extra Body Points Enabled", "label_off": "Extra Body Points Disabled"}),
+                "num_extra_points_per_bone": ("INT", {"default": 5, "min": 0, "max": 1000, "step": 1, "label": "Extra Points Per Bone"}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",) # ComfyUI에서 문자열 리스트를 담는 단일 슬롯으로 처리될 수 있음
+    RETURN_NAMES = ("coord_str",) #
+    FUNCTION = "convert_to_coord_str" #
+    CATEGORY = "Pose Interpolation" #
+
+    def convert_to_coord_str(self, pose_keypoint, enable_body, enable_face, enable_hand, enable_extra_points, num_extra_points_per_bone): # num_extra_points_per_bone 파라미터 추가
+        if not pose_keypoint:
+            return (["[]"],)
+
+        pose_keypoint_list = pose_keypoint if isinstance(pose_keypoint, list) else [pose_keypoint]
+
+        if not pose_keypoint_list:
+            return (["[]"],)
+
+        all_poses_kps_extracted = []
+        max_kps_count_overall = 0
+        
+        # NUM_EXTRA_POINTS_PER_BONE 상수를 제거하고 입력 파라미터 사용
+
+        for pose_data_idx, pose_data in enumerate(pose_keypoint_list):
+            current_pose_all_coords_dicts_for_frame = []
+            if pose_data and "people" in pose_data and pose_data["people"]:
+                person_data = pose_data["people"][0]
+                
+                # Body points 처리
+                if enable_body:
+                    body_keypoints_flat = person_data.get("pose_keypoints_2d", [])
+                    if body_keypoints_flat and len(body_keypoints_flat) > 0:
+                        body_kps_triplets = []
+                        for i in range(0, len(body_keypoints_flat), 3):
+                            x = int(body_keypoints_flat[i])
+                            y = int(body_keypoints_flat[i+1])
+                            c = body_keypoints_flat[i+2]
+                            body_kps_triplets.append({"x": x, "y": y, "c": c})
+                            current_pose_all_coords_dicts_for_frame.append({"x": x, "y": y})
+
+                        # enable_extra_points가 True이고, 사용자가 지정한 추가 포인트 수가 0보다 클 경우
+                        if enable_extra_points and num_extra_points_per_bone > 0:
+                            # body_skeleton은 전역 변수로 가정 (코드 상단에 정의된 것을 사용)
+                            for p1_idx, p2_idx in body_skeleton:
+                                if p1_idx < len(body_kps_triplets) and p2_idx < len(body_kps_triplets):
+                                    p1 = body_kps_triplets[p1_idx]
+                                    p2 = body_kps_triplets[p2_idx]
+
+                                    if p1["c"] > 0 and p2["c"] > 0: # 두 원본 포인트의 신뢰도가 유효할 때만
+                                        for j in range(1, num_extra_points_per_bone + 1):
+                                            ratio = j / float(num_extra_points_per_bone + 1)
+                                            extra_x = int(p1["x"] + (p2["x"] - p1["x"]) * ratio)
+                                            extra_y = int(p1["y"] + (p2["y"] - p1["y"]) * ratio)
+                                            current_pose_all_coords_dicts_for_frame.append({"x": extra_x, "y": extra_y})
+                
+                # Face points 처리
+                if enable_face:
+                    face_keypoints_flat = person_data.get("face_keypoints_2d", [])
+                    if face_keypoints_flat and len(face_keypoints_flat) > 0:
+                        for i in range(0, len(face_keypoints_flat), 3):
+                            x = int(face_keypoints_flat[i])
+                            y = int(face_keypoints_flat[i+1])
+                            current_pose_all_coords_dicts_for_frame.append({"x": x, "y": y})
+                
+                # Hand points 처리 (left and right)
+                if enable_hand:
+                    for hand_type_key in ["hand_left_keypoints_2d", "hand_right_keypoints_2d"]:
+                        hand_keypoints_flat = person_data.get(hand_type_key, [])
+                        if hand_keypoints_flat and len(hand_keypoints_flat) > 0:
+                            for i in range(0, len(hand_keypoints_flat), 3):
+                                x = int(hand_keypoints_flat[i])
+                                y = int(hand_keypoints_flat[i+1])
+                                current_pose_all_coords_dicts_for_frame.append({"x": x, "y": y})
+            
+            all_poses_kps_extracted.append(current_pose_all_coords_dicts_for_frame)
+            if len(current_pose_all_coords_dicts_for_frame) > max_kps_count_overall:
+                max_kps_count_overall = len(current_pose_all_coords_dicts_for_frame)
+        
+        if max_kps_count_overall == 0:
+             return (["[]"],)
+
+        output_coord_groups_json_str = []
+        for i in range(max_kps_count_overall):
+            coords_for_this_track = []
+            for single_pose_kps_list in all_poses_kps_extracted:
+                if i < len(single_pose_kps_list):
+                    coords_for_this_track.append(single_pose_kps_list[i])
+                else:
+                    if coords_for_this_track: 
+                        coords_for_this_track.append({"x": coords_for_this_track[-1]["x"], "y": coords_for_this_track[-1]["y"]})
+                    else:
+                        coords_for_this_track.append({"x": 0, "y": 0})
+            
+            output_coord_groups_json_str.append(json.dumps(coords_for_this_track))
+
+        return (output_coord_groups_json_str,)
+
+class JoinPose:
+    def __init__(self):
+        pass
+
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "pose_keypoint_1": ("POSE_KEYPOINT",),
+                "pose_keypoint_2": ("POSE_KEYPOINT",),
+            }
+        }
+
+    RETURN_TYPES = ("POSE_KEYPOINT",)
+    RETURN_NAMES = ("pose_keypoint",)
+    FUNCTION = "join_poses"
+    CATEGORY = "Pose Interpolation" 
+
+    def join_poses(self, pose_keypoint_1, pose_keypoint_2):
+
+        # 입력이 None일 경우 빈 리스트로 처리하여 오류 방지
+        list_1 = pose_keypoint_1 if pose_keypoint_1 is not None else []
+        list_2 = pose_keypoint_2 if pose_keypoint_2 is not None else []
+
+        # 두 리스트를 순서대로 합침
+        joined_list = list(list_1) + list(list_2)
+
+        return (joined_list,)
+        
 NODE_CLASS_MAPPINGS = {
-    "Pose_Inter": Pose_Inter
+    "Pose_Inter": Pose_Inter,
+    "PoseKeypointToCoordStr": PoseKeypointToCoordStr,
+    "JoinPose": JoinPose
 }
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "Pose_Inter": "Pose Interpolation"
+    "Pose_Inter": "Pose Interpolation",
+    "PoseKeypointToCoordStr": "POSE_KEYPOINT to Coord_str",
+    "JoinPose": "join_pose"
 }
