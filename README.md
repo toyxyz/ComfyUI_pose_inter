@@ -12,6 +12,20 @@ https://github.com/toyxyz/ComfyUI-ultimate-openpose-editor
 
 # update
 
+2025/06/03 : Added POSE_KEYPOINT to Coord_str node. It is useful when using Openpose with Wan 2.1 ATI. 
+
+![image](https://github.com/user-attachments/assets/5484c587-5cdb-40cc-909b-538b98feec66)
+
+
+https://github.com/kijai/ComfyUI-WanVideoWrapper/blob/main/example_workflows/wanvideo_ATI_testing_01.json
+
+Added join_pose node. Creates a list of two Pose_keypoints.
+
+![image](https://github.com/user-attachments/assets/f2aa8ad7-8b52-4c2c-b382-24b2ef86437c)
+
+
+
+
 Added Pick_frame. 
 If you enter a number greater than or equal to 0, you will get the pose for that number of frames instead of the entire frame. When using a Pose Sequence, if pose_from and pose_to have the same frame number, you can enter a list of integers with the same number of frames in pick_frame to move the point halfway between the two Pose Sequences.
 
